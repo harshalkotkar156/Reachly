@@ -44,7 +44,7 @@ const sendEmail = async (transporter, contact) => {
   const mailOptions = {
     from: `"Harshal Kotkar" <${process.env.EMAIL_USER}>`,
     to: contact.email,
-    subject: `Job Inquiry – Full Stack Developer | ${contact.company}`,
+    subject: `Application for Full Stack Developer Role`,
     html,
     attachments: [
       {
