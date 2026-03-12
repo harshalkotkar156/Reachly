@@ -10,11 +10,12 @@ const BATCH_DELAY_MS = 10000; // 10 seconds between batches
 // In-memory state for live progress tracking
 let sendingState = {
   isRunning: false,
+  stopRequested: false,
   currentBatch: 0,
   totalBatches: 0,
   sentCount: 0,
   failedCount: 0,
-  totalPending: 0,
+  totalToSend: 0,
   message: '',
 };
 
@@ -58,20 +59,34 @@ const sendEmail = async (transporter, contact) => {
 };
 
 /**
- * Sleep helper
+ * Sleep helper — respects stopRequested flag.
  */
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms) =>
+  new Promise((resolve) => {
+    const interval = 500;
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      elapsed += interval;
+      if (elapsed >= ms || sendingState.stopRequested) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, interval);
+  });
 
 /**
  * Start batch email sending.
- * Processes all pending contacts in batches of BATCH_SIZE.
+ * @param {number} count - How many pending emails to send (from frontend input).
  */
-const startSending = async () => {
+const startSending = async (count) => {
   if (sendingState.isRunning) {
     throw new Error('Email sending is already in progress.');
   }
 
-  const pendingContacts = await Contact.find({ status: 'pending' });
+  const limit = count && count > 0 ? parseInt(count, 10) : 20;
+
+  // Fetch only the requested number of pending contacts
+  const pendingContacts = await Contact.find({ status: 'pending' }).limit(limit);
 
   if (pendingContacts.length === 0) {
     return { message: 'No pending contacts to send emails to.' };
@@ -79,11 +94,12 @@ const startSending = async () => {
 
   sendingState = {
     isRunning: true,
+    stopRequested: false,
     currentBatch: 0,
     totalBatches: Math.ceil(pendingContacts.length / BATCH_SIZE),
     sentCount: 0,
     failedCount: 0,
-    totalPending: pendingContacts.length,
+    totalToSend: pendingContacts.length,
     message: 'Starting...',
   };
 
@@ -93,6 +109,12 @@ const startSending = async () => {
   (async () => {
     try {
       for (let i = 0; i < pendingContacts.length; i += BATCH_SIZE) {
+        // Check stop flag before each batch
+        if (sendingState.stopRequested) {
+          sendingState.message = `Stopped. Sent ${sendingState.sentCount} emails.`;
+          break;
+        }
+
         const batch = pendingContacts.slice(i, i + BATCH_SIZE);
         sendingState.currentBatch++;
         sendingState.message = `Sending batch ${sendingState.currentBatch} / ${sendingState.totalBatches}...`;
@@ -118,27 +140,43 @@ const startSending = async () => {
 
         await Promise.all(promises);
 
-        // Wait before next batch — unless it's the last batch
-        if (i + BATCH_SIZE < pendingContacts.length) {
+        // Wait before next batch — unless it's the last batch or stop was requested
+        const isLastBatch = i + BATCH_SIZE >= pendingContacts.length;
+        if (!isLastBatch && !sendingState.stopRequested) {
           sendingState.message = `Batch ${sendingState.currentBatch} done. Waiting 10s before next batch...`;
           await sleep(BATCH_DELAY_MS);
         }
       }
 
-      sendingState.message = 'All emails processed.';
+      if (!sendingState.stopRequested) {
+        sendingState.message = `Done! Sent ${sendingState.sentCount} of ${sendingState.totalToSend} emails.`;
+      }
     } catch (err) {
       sendingState.message = `Error: ${err.message}`;
       console.error('Sending error:', err);
     } finally {
       sendingState.isRunning = false;
+      sendingState.stopRequested = false;
     }
   })();
 
   return {
-    message: 'Email sending started.',
-    totalPending: pendingContacts.length,
+    message: `Sending ${pendingContacts.length} emails in ${sendingState.totalBatches} batch(es).`,
+    totalToSend: pendingContacts.length,
     totalBatches: sendingState.totalBatches,
   };
 };
 
-module.exports = { startSending, getSendingState };
+/**
+ * Signal the background sender to stop after finishing the current batch.
+ */
+const stopSending = () => {
+  if (!sendingState.isRunning) {
+    return { message: 'No sending in progress.' };
+  }
+  sendingState.stopRequested = true;
+  sendingState.message = 'Stop requested — finishing current batch...';
+  return { message: 'Stop requested. Will stop after current batch completes.' };
+};
+
+module.exports = { startSending, stopSending, getSendingState };

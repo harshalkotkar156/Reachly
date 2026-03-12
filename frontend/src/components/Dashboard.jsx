@@ -6,6 +6,8 @@ import {
   importCSV,
   rescanCSV,
   startSending,
+  stopSending,
+  retryFailed,
   getStats,
   getContacts,
   getProgress,
@@ -100,16 +102,41 @@ const Dashboard = () => {
     }
   };
 
-  const handleStartSending = async () => {
+  const handleStartSending = async (count) => {
     setLoading('sending');
     try {
-      const res = await startSending();
+      const res = await startSending(count);
       showToast(res.data.message, 'success');
       // Trigger polling
       const statsRes = await getStats();
       setSending(statsRes.data.sending);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to start sending.', 'error');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleStopSending = async () => {
+    try {
+      const res = await stopSending();
+      showToast(res.data.message, 'success');
+      // Update sending state immediately to show stopRequested
+      setSending((prev) => prev ? { ...prev, stopRequested: true } : prev);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to stop sending.', 'error');
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    setLoading('retry');
+    try {
+      const res = await retryFailed();
+      showToast(res.data.message, 'success');
+      fetchStats();
+      fetchContacts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to reset emails.', 'error');
     } finally {
       setLoading(null);
     }
@@ -149,8 +176,11 @@ const Dashboard = () => {
           onImport={handleImport}
           onRescan={handleRescan}
           onStartSending={handleStartSending}
+          onStopSending={handleStopSending}
+          onRetryFailed={handleRetryFailed}
           loading={loading}
           sending={sending}
+          stats={stats}
           toast={toast}
         />
 

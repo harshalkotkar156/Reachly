@@ -7,7 +7,9 @@ const API = axios.create({
 
 export const importCSV = () => API.post('/import-csv');
 export const rescanCSV = () => API.post('/rescan-csv');
-export const startSending = () => API.post('/start-sending');
+export const startSending = (count) => API.post('/start-sending', { count });
+export const stopSending = () => API.post('/stop-sending');
+export const retryFailed = () => API.post('/retry-failed');
 export const getStats = () => API.get('/stats');
 export const getContacts = (params = {}) => API.get('/contacts', { params });
 export const getProgress = () => API.get('/progress');
